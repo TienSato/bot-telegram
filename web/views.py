@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from django.contrib.auth import login
 from django.contrib.auth.models import User
@@ -13,6 +14,43 @@ from django.core import signing
 from django.shortcuts import redirect, render
 
 logger = logging.getLogger(__name__)
+
+_BASE_TAG_RE = re.compile(r"<base\b[^>]*>", re.IGNORECASE)
+_BASE_HREF_RE = re.compile(r"""\bhref\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""", re.IGNORECASE)
+_HEAD_OPEN_RE = re.compile(r"<head\b[^>]*>", re.IGNORECASE)
+_LINK_TAG_RE = re.compile(r"<(?:a|area|form)\b[^>]*>", re.IGNORECASE)
+_TARGET_ATTR_RE = re.compile(
+    r"""\s+target\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""", re.IGNORECASE,
+)
+
+
+def _force_links_new_tab(html: str) -> str:
+    """Moi link/nut trong mail mo o tab/cua so moi, khong load trong webview.
+
+    Chen <base target="_blank"> vao HTML cua mail. Neu mail da co the <base>
+    thi giu lai href cua no (link tuong doi van dung) nhung ep target=_blank.
+    """
+    if not html:
+        return html
+    href = ""
+    m = _BASE_TAG_RE.search(html)
+    if m:
+        hm = _BASE_HREF_RE.search(m.group(0))
+        if hm:
+            href = hm.group(1).strip("\"'")
+        html = _BASE_TAG_RE.sub("", html)
+    # Bo target rieng cua tung link (_self/_top/_parent) de <base> ap dung.
+    html = _LINK_TAG_RE.sub(
+        lambda t: _TARGET_ATTR_RE.sub("", t.group(0)), html,
+    )
+    base = '<base target="_blank"'
+    if href:
+        base += ' href="' + href.replace('"', "&quot;") + '"'
+    base += ">"
+    hm = _HEAD_OPEN_RE.search(html)
+    if hm:
+        return html[:hm.end()] + base + html[hm.end():]
+    return base + html
 
 
 def setup_view(request):
@@ -106,4 +144,6 @@ def mail_view(request):
         "content_type": (detail.get("content_type") or "text").lower(),
         "body_html": detail.get("html_body", "") or "",
     }
+    if ctx["content_type"] == "html":
+        ctx["body_html"] = _force_links_new_tab(ctx["body_html"])
     return render(request, "mail/view.html", ctx)
