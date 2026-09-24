@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Lint / test cache
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Environment & secrets
+.env
+deploy.conf
+
+# Data
+data/
+
+# Django
+staticfiles/
+
+# OS
+.DS_Store
+Thumbs.db

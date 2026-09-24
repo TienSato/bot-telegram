@@ -1,0 +1,15 @@
+# Bot Telegram
+aiogram==3.15.0
+
+# Web framework + admin
+django>=5.1,<5.2
+uvicorn[standard]==0.30.0
+
+# Database PostgreSQL
+psycopg2-binary==2.9.10
+
+# Doc .env
+python-dotenv==1.0.1
+
+# HTTP requests (Microsoft Graph API)
+requests==2.32.3

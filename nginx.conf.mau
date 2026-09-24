@@ -1,0 +1,47 @@
+# =============================================================================
+#  Nginx reverse proxy — __DOMAIN__ -> Django admin panel (X-Bot)
+#
+#  File mau nay duoc scripts/server/cai-nginx.sh dung de tao config.
+#  Cac placeholder duoc thay tu .env:
+#    __DOMAIN__       -> DOMAIN
+#    __ADMIN_PORT__   -> ADMIN_PORT
+#    __PROJECT_DIR__  -> thu muc project tren server
+#
+#  Neu server dung BaoTa/aaPanel: copy noi dung block server vao
+#  /www/server/panel/vhost/nginx/__DOMAIN__.conf
+#  va giu nguyen phan SSL do panel quan ly.
+# =============================================================================
+
+server {
+    listen 80;
+    listen 443 ssl http2;
+    server_name __DOMAIN__;
+    index index.html;
+
+    # === SSL (thay bang cert cua ban, hoac de panel/certbot quan ly) ===
+    # ssl_certificate    /path/to/fullchain.pem;
+    # ssl_certificate_key    /path/to/privkey.pem;
+    # ssl_protocols TLSv1.2 TLSv1.3;
+
+    # === Django static files ===
+    location /static/ {
+        alias __PROJECT_DIR__/staticfiles/;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # === Reverse proxy -> Django container ===
+    location / {
+        proxy_pass http://127.0.0.1:__ADMIN_PORT__;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    access_log  /var/log/nginx/__DOMAIN__.log;
+    error_log   /var/log/nginx/__DOMAIN__.error.log;
+}

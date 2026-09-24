@@ -1,0 +1,208 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Ma trận quyền{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Trang chủ</a>
+    &rsaquo; <a href="{% url 'admin:core_telegramuser_changelist' %}">Telegram Users</a>
+    &rsaquo; Ma trận quyền
+</div>
+{% endblock %}
+
+{% block content %}
+<style>
+    .matrix-container {
+        overflow-x: auto;
+        margin: 20px 0;
+    }
+    .matrix-table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 13px;
+    }
+    .matrix-table th,
+    .matrix-table td {
+        border: 1px solid #ddd;
+        padding: 8px 12px;
+        text-align: center;
+        white-space: nowrap;
+    }
+    .matrix-table th {
+        background: #79aec8;
+        color: white;
+        font-weight: bold;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+    .matrix-table th.user-col {
+        text-align: left;
+        min-width: 200px;
+    }
+    .matrix-table tr:nth-child(even) {
+        background: #f9f9f9;
+    }
+    .matrix-table tr:hover {
+        background: #e8f4f8;
+    }
+    .matrix-table td.user-cell {
+        text-align: left;
+        font-weight: 500;
+    }
+    .matrix-table td.user-cell a {
+        color: #417690;
+        text-decoration: none;
+    }
+    .matrix-table td.user-cell a:hover {
+        text-decoration: underline;
+    }
+    .badge-admin {
+        background: #ffc107;
+        color: #000;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 11px;
+        margin-left: 4px;
+    }
+    .feature-disabled {
+        opacity: 0.5;
+    }
+    .matrix-checkbox {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+    }
+    .toolbar {
+        margin: 15px 0;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+    .toolbar button {
+        padding: 6px 16px;
+        cursor: pointer;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        background: #f8f8f8;
+        font-size: 13px;
+    }
+    .toolbar button:hover {
+        background: #e8e8e8;
+    }
+    .toolbar button.primary {
+        background: #417690;
+        color: white;
+        border-color: #417690;
+    }
+    .toolbar button.primary:hover {
+        background: #205067;
+    }
+    .stats {
+        color: #666;
+        font-size: 13px;
+        margin-left: auto;
+    }
+</style>
+
+<h2 style="margin-bottom:5px;">Ma trận quyền — User × Chức năng</h2>
+<p style="color:#666;margin-top:0;">
+    = Cho phép &nbsp;|&nbsp; = Từ chối &nbsp;|&nbsp;
+    Mặc định (không có bản ghi) = Cho phép
+</p>
+
+{% if matrix %}
+<form method="post">
+    {% csrf_token %}
+
+    <div class="toolbar">
+        <button type="button" onclick="selectAll(true)">Chọn tất cả</button>
+        <button type="button" onclick="selectAll(false)">Bỏ chọn tất cả</button>
+        <button type="button" onclick="selectColumn()">Chọn theo cột...</button>
+        <button type="submit" class="primary">Lưu thay đổi</button>
+        <span class="stats">
+            {{ matrix|length }} user × {{ features|length }} chức năng
+        </span>
+    </div>
+
+    <div class="matrix-container">
+        <table class="matrix-table">
+            <thead>
+                <tr>
+                    <th class="user-col">User</th>
+                    {% for feature in features %}
+                    <th class="{% if not feature.enabled %}feature-disabled{% endif %}"
+                        title="{{ feature.description }}{% if not feature.enabled %} (TẮT){% endif %}">
+                        {{ feature.name }}
+                        {% if not feature.enabled %}<br><small>(tắt)</small>{% endif %}
+                    </th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in matrix %}
+                <tr>
+                    <td class="user-cell">
+                        <a href="{% url 'admin:core_telegramuser_change' row.user.pk %}">
+                            {% if row.user.username %}
+                                @{{ row.user.username }}
+                            {% else %}
+                                {{ row.user.telegram_id }}
+                            {% endif %}
+                        </a>
+                        {% if row.user.first_name %}
+                            <span style="color:#888">({{ row.user.first_name }})</span>
+                        {% endif %}
+                        {% if row.user.is_admin %}
+                            <span class="badge-admin">Admin</span>
+                        {% endif %}
+                    </td>
+                    {% for perm in row.permissions %}
+                    <td class="{% if not perm.feature_enabled %}feature-disabled{% endif %}">
+                        <input type="checkbox"
+                               name="{{ perm.field_name }}"
+                               class="matrix-checkbox feature-col-{{ perm.feature_name }}"
+                               {% if perm.allowed %}checked{% endif %}
+                               title="{{ perm.feature_name }} — {% if perm.allowed %}Cho phép{% else %}Từ chối{% endif %}">
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="toolbar" style="margin-top:10px;">
+        <button type="submit" class="primary">Lưu thay đổi</button>
+    </div>
+</form>
+
+<script>
+function selectAll(checked) {
+    document.querySelectorAll('.matrix-checkbox').forEach(cb => {
+        cb.checked = checked;
+    });
+}
+
+function selectColumn() {
+    const features = [{% for f in features %}'{{ f.name }}'{% if not forloop.last %},{% endif %}{% endfor %}];
+    const choice = prompt('Nhập tên chức năng để bật/tắt cột:\n\n' + features.join(', '));
+    if (!choice) return;
+
+    const name = choice.trim();
+    const checkboxes = document.querySelectorAll('.feature-col-' + name);
+    if (checkboxes.length === 0) {
+        alert('Không tìm thấy chức năng: ' + name);
+        return;
+    }
+
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+    checkboxes.forEach(cb => { cb.checked = !allChecked; });
+}
+</script>
+
+{% else %}
+<p style="color:#999;font-style:italic;">Chưa có user nào trong hệ thống.</p>
+{% endif %}
+{% endblock %}

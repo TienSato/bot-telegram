@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{% if subject %}{{ subject }}{% else %}Mail{% endif %}</title>
+<style>
+  :root {
+    --bg: #f2f3f5;
+    --card: #ffffff;
+    --text: #1c1e21;
+    --muted: #65676b;
+    --border: #e4e6eb;
+    --accent: #2f7bd6;
+    --code-bg: #eef6ff;
+    --code-text: #1a5fb4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17191c;
+      --card: #23262b;
+      --text: #e7e9ea;
+      --muted: #9aa0a6;
+      --border: #34383e;
+      --accent: #5aa2f0;
+      --code-bg: #10233a;
+      --code-text: #7cc0ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 12px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .head { padding: 16px; border-bottom: 1px solid var(--border); }
+  .subject { font-size: 18px; font-weight: 700; margin: 0 0 10px; word-break: break-word; }
+  .meta { font-size: 13px; color: var(--muted); }
+  .meta .name { color: var(--text); font-weight: 600; }
+  .meta div { margin-top: 2px; }
+  .code-box {
+    display: flex; align-items: center; gap: 10px;
+    margin: 14px 16px 0;
+    padding: 12px 14px;
+    background: var(--code-bg);
+    border-radius: 10px;
+  }
+  .code-box .val {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 22px; font-weight: 700; letter-spacing: 2px;
+    color: var(--code-text); flex: 1; word-break: break-all;
+  }
+  .code-box button {
+    border: 0; border-radius: 8px; padding: 8px 14px;
+    background: var(--accent); color: #fff; font-size: 14px; font-weight: 600;
+    cursor: pointer;
+  }
+  .body-wrap { padding: 8px 4px 4px; }
+  iframe.body {
+    width: 100%; height: 72vh; border: 0; background: #fff; border-radius: 8px;
+    display: block;
+  }
+  pre.body {
+    white-space: pre-wrap; word-break: break-word;
+    margin: 0; padding: 14px 16px; font-size: 14px;
+    font-family: inherit;
+  }
+  .error {
+    margin: 40px 16px; padding: 18px; text-align: center;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    color: var(--muted);
+  }
+  .foot { text-align: center; color: var(--muted); font-size: 12px; padding: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+{% if error %}
+  <div class="error">
+    <p style="font-size:16px;color:var(--text);font-weight:600;margin-top:0;">Không mở được mail</p>
+    <p>{{ error }}</p>
+    {% if email %}<p style="font-size:12px;">{{ email }}</p>{% endif %}
+  </div>
+{% else %}
+  <div class="card">
+    <div class="head">
+      <p class="subject">{{ subject }}</p>
+      <div class="meta">
+        <div><span class="name">{{ from_name }}</span> &lt;{{ from_address }}&gt;</div>
+        <div>{{ date }}</div>
+        {% if email %}<div>Hộp thư: {{ email }}</div>{% endif %}
+      </div>
+    </div>
+
+    {% if code %}
+    <div class="code-box">
+      <div class="val" id="code">{{ code }}</div>
+      <button type="button" onclick="copyCode()">Copy</button>
+    </div>
+    {% endif %}
+
+    <div class="body-wrap">
+      {% if content_type == "html" %}
+        <iframe class="body"
+                sandbox="allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
+                referrerpolicy="no-referrer"
+                srcdoc="{{ body_html }}"></iframe>
+      {% else %}
+        <pre class="body">{{ body_html }}</pre>
+      {% endif %}
+    </div>
+  </div>
+  <div class="foot">Read Mail Bot</div>
+{% endif %}
+</div>
+
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+  try { if (window.Telegram && Telegram.WebApp) { Telegram.WebApp.ready(); Telegram.WebApp.expand(); } } catch (e) {}
+  function copyCode() {
+    var el = document.getElementById('code');
+    if (!el) return;
+    var txt = el.textContent.trim();
+    var done = function () {
+      var b = document.querySelector('.code-box button');
+      if (b) { var o = b.textContent; b.textContent = 'Đã copy'; setTimeout(function(){ b.textContent = o; }, 1500); }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(done).catch(function(){ fallback(txt, done); });
+    } else { fallback(txt, done); }
+  }
+  function fallback(txt, done) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = txt; document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta); done();
+    } catch (e) {}
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+# docker-compose.prod.yml — Chay bot tren server
+#
+# Khong goi truc tiep: scripts/trien-khai.sh se goi docker compose voi file nay.
+# Muon chay tay tren server:
+#   docker compose -f docker-compose.prod.yml --env-file .env up -d --build
+
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: readmail-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-readmailbot}
+      POSTGRES_USER: ${DB_USER:-readmailbot}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-readmailbot}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-readmailbot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: readmail-bot
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./staticfiles:/app/staticfiles
+    ports:
+      - "127.0.0.1:${ADMIN_PORT:-8085}:8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  pg-data:
+    driver: local
