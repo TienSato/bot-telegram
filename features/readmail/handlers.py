@@ -10,9 +10,11 @@ Ho tro 2 cach dung:
 from __future__ import annotations
 
 import html
+import io
 import logging
 import os
 import re
+import unicodedata
 
 from aiogram import F, Router, types
 from aiogram.filters import Command
@@ -52,6 +54,27 @@ router.callback_query.middleware(FeatureMiddleware(FEATURE_NAME))
 
 # ── Gioi han ky tu Telegram ──────────────────────────────────────────────
 MAX_MSG_LEN = 4000
+
+# ── Chuan hoa dau vao ────────────────────────────────────────────────────
+# Bo cac ky tu zero-width / dieu khien huong (lam hong parse combo)
+_ZERO_WIDTH_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]")
+# Kich thuoc toi da file .txt nhan qua Telegram
+_MAX_TXT_BYTES = 2 * 1024 * 1024
+
+
+def _normalize_input(text: str) -> str:
+    """Chuan hoa dau vao truoc khi parse combo.
+
+    Nhieu nguoi copy combo bi dinh dinh dang "chu nghieng"/"chu dam" kieu
+    Unicode (Mathematical Alphanumeric Symbols) hoac ky tu full-width. NFKC
+    dua tat ca ve chu/so ASCII binh thuong (ca dau '|' full-width). Dong thoi
+    bo cac ky tu zero-width vo hinh khien tach truong sai.
+    """
+    if not text:
+        return text
+    text = unicodedata.normalize("NFKC", text)
+    text = _ZERO_WIDTH_RE.sub("", text)
+    return text
 
 # ── Cache danh sach mail da doc (de xem chi tiet qua nut bam) ─────────────
 # Key: (telegram_user_db_id, account_id) -> list[message_dict]
@@ -556,32 +579,28 @@ async def cmd_addmail(message: types.Message, state: FSMContext, db_user) -> Non
         "<code>email|password|refresh_token|client_id|tenant_id</code>\n\n"
         "Bot chỉ dùng <b>refresh_token</b> và <b>client_id</b> để đọc mail. "
         "Trường <b>password</b> không được dùng (chỉ có sẵn trong combo).\n\n"
-        "Có thể gửi nhiều dòng để thêm nhiều tài khoản cùng lúc.\n\n"
+        "Có thể gửi nhiều dòng để thêm nhiều tài khoản cùng lúc, "
+        "hoặc gửi thẳng một file <b>.txt</b> (bot tự đọc và nhập).\n\n"
         "Gửi /cancel để hủy.",
         parse_mode="HTML",
     )
 
 
-@router.message(AddMailStates.waiting_for_credentials)
-async def process_addmail_credentials(
-    message: types.Message, state: FSMContext, db_user,
+async def _import_credentials_text(
+    message: types.Message, state: FSMContext, db_user, text: str,
 ) -> None:
-    """Xu ly thong tin tai khoan mail duoc gui. Sau do hien menu nut bam."""
+    """Parse + import tai khoan tu text. Dung chung cho tin nhan va file .txt."""
     from core.db import add_mail_account, get_user_accounts
 
-    text = message.text or ""
-
-    if text.strip().lower() == "/cancel":
-        await state.clear()
-        await _safe_delete(message)  # xoa luon tin /cancel cua user
-        await message.answer("Đã hủy thêm tài khoản.")
-        return
+    # Chuan hoa: chu nghieng/dam kieu unicode -> ASCII, bo ky tu vo hinh.
+    text = _normalize_input(text)
 
     lines = [line.strip() for line in text.strip().split("\n") if line.strip()]
     if not lines:
+        await state.clear()
         await message.answer(
             "Không có dữ liệu. Gửi lại theo định dạng:\n"
-            "<code>email|refresh_token|client_id[|tenant_id]</code>",
+            "<code>email|password|refresh_token|client_id[|tenant_id]</code>",
             parse_mode="HTML",
         )
         return
@@ -624,7 +643,7 @@ async def process_addmail_credentials(
     await state.clear()
 
     # Bao mat: tu xoa tin nhan chua thong tin tai khoan user vua gui.
-    # CHI xoa khi tin co dinh dang tk (chua dau '|') -> tranh xoa nham tin khac.
+    # CHI xoa khi co dinh dang tk (chua dau '|') -> tranh xoa nham tin khac.
     # (Chat rieng: bot xoa duoc; trong nhom: can bot la admin co quyen xoa tin.)
     if "|" in text:
         await _safe_delete(message)
@@ -632,13 +651,85 @@ async def process_addmail_credentials(
     # Hien ket qua + menu nut bam cac tai khoan
     if added_any:
         accounts = await get_user_accounts(db_user.id)
-        await message.answer(
+        for i, part in enumerate(_split_message(
             "\n".join(results) + "\n\nChọn tài khoản để dùng:",
-            parse_mode="HTML",
-            reply_markup=kb_accounts_list(accounts),
-        )
+        )):
+            await message.answer(
+                part,
+                parse_mode="HTML",
+                reply_markup=kb_accounts_list(accounts)
+                if i == 0 else None,
+            )
     else:
-        await message.answer("\n".join(results), parse_mode="HTML")
+        for part in _split_message("\n".join(results)):
+            await message.answer(part, parse_mode="HTML")
+
+
+@router.message(AddMailStates.waiting_for_credentials, F.text)
+async def process_addmail_credentials(
+    message: types.Message, state: FSMContext, db_user,
+) -> None:
+    """Xu ly thong tin tai khoan mail gui bang text. Sau do hien menu nut bam."""
+    text = message.text or ""
+
+    if text.strip().lower() == "/cancel":
+        await state.clear()
+        await _safe_delete(message)  # xoa luon tin /cancel cua user
+        await message.answer("Đã hủy thêm tài khoản.")
+        return
+
+    await _import_credentials_text(message, state, db_user, text)
+
+
+@router.message(AddMailStates.waiting_for_credentials, F.document)
+async def process_addmail_document(
+    message: types.Message, state: FSMContext, db_user,
+) -> None:
+    """Nhan file .txt chua combo -> tu doc noi dung va import."""
+    doc = message.document
+    name = (doc.file_name or "").lower()
+    mime = (doc.mime_type or "").lower()
+    is_txt = name.endswith(".txt") or mime.startswith("text/")
+    if not is_txt:
+        await message.answer(
+            "Chỉ nhận file <b>.txt</b>. Gửi lại file văn bản, "
+            "hoặc dán trực tiếp thông tin.\n\nGửi /cancel để hủy.",
+            parse_mode="HTML",
+        )
+        return
+
+    if doc.file_size and doc.file_size > _MAX_TXT_BYTES:
+        await message.answer(
+            "File quá lớn (giới hạn 2MB). Tách nhỏ rồi gửi lại.",
+        )
+        return
+
+    try:
+        buf = io.BytesIO()
+        await message.bot.download(doc, destination=buf)
+        raw = buf.getvalue()
+    except Exception as e:
+        logger.error("Loi tai file .txt: %s", e)
+        await message.answer(
+            "Không tải được file. Thử lại, hoặc dán trực tiếp thông tin.",
+        )
+        return
+
+    # Giai ma text: thu vai bang ma pho bien roi moi bo qua ky tu loi.
+    text = None
+    for enc in ("utf-8-sig", "utf-8", "utf-16", "latin-1"):
+        try:
+            text = raw.decode(enc)
+            break
+        except Exception:
+            continue
+    if text is None:
+        text = raw.decode("utf-8", errors="ignore")
+
+    # Bao mat: xoa file combo user vua gui.
+    await _safe_delete(message)
+
+    await _import_credentials_text(message, state, db_user, text)
 
 
 @router.message(Command("menu"))
