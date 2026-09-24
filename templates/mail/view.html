@@ -112,7 +112,7 @@
     <div class="body-wrap">
       {% if content_type == "html" %}
         <iframe class="body"
-                sandbox="allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
+                sandbox="allow-popups allow-popups-to-escape-sandbox"
                 referrerpolicy="no-referrer"
                 srcdoc="{{ body_html }}"></iframe>
       {% else %}
