@@ -102,6 +102,23 @@ _session = _create_session()
 _token_cache: dict[tuple[str, str], tuple[dict, float]] = {}
 _token_cache_lock = threading.Lock()
 _token_semaphore = threading.Semaphore(TOKEN_EXCHANGE_CONCURRENCY)
+_token_semaphore_lock = threading.Lock()
+
+
+def set_token_concurrency(n: int) -> None:
+    """Dat lai so luong doi token dong thoi (goi tu service khi admin doi cau hinh).
+
+    Cac luot doi token dang chay van dung semaphore cu cho den khi xong;
+    cac luot moi dung gia tri moi.
+    """
+    global _token_semaphore, TOKEN_EXCHANGE_CONCURRENCY
+    if n < 1 or n == TOKEN_EXCHANGE_CONCURRENCY:
+        return
+    with _token_semaphore_lock:
+        TOKEN_EXCHANGE_CONCURRENCY = n
+        _token_semaphore = threading.Semaphore(n)
+    logger.info("TOKEN_EXCHANGE_CONCURRENCY doi thanh %d", n)
+
 
 # Circuit breaker state
 _circuit_breaker_until: float = 0.0

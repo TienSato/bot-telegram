@@ -29,21 +29,30 @@ DEFAULT_SETTINGS: list[dict] = [
         "key": "MAX_MAIL_WORKERS",
         "value": "10",
         "category": "mail",
-        "description": "So luong worker xu ly mail dong thoi",
+        "description": (
+            "So luong worker xu ly mail dong thoi (1-100). "
+            "Doi xong co hieu luc sau toi da 30 giay, khong can restart."
+        ),
         "is_secret": False,
     },
     {
         "key": "TOKEN_EXCHANGE_CONCURRENCY",
         "value": "4",
         "category": "mail",
-        "description": "So luong dong thoi khi doi token Microsoft",
+        "description": (
+            "So luong dong thoi khi doi token Microsoft (1-50). "
+            "Doi xong co hieu luc sau toi da 30 giay, khong can restart."
+        ),
         "is_secret": False,
     },
     {
         "key": "BOT_CHECK_INTERVAL",
         "value": "10",
         "category": "general",
-        "description": "Khoang thoi gian (giay) kiem tra thay doi bot",
+        "description": (
+            "Khoang thoi gian (giay) kiem tra thay doi bot (3-3600). "
+            "Doi xong co hieu luc ngay o vong kiem tra ke tiep."
+        ),
         "is_secret": False,
     },
     {

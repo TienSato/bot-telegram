@@ -1,10 +1,17 @@
-"""Async service wrapper — boc cac ham sync graph_api thanh async."""
+"""Async service wrapper — boc cac ham sync graph_api thanh async.
+
+MAX_MAIL_WORKERS va TOKEN_EXCHANGE_CONCURRENCY doc tu Admin -> Bot Settings.
+Thread pool / semaphore duoc tao LUC DUNG (khong phai luc import) va tu tao lai
+khi gia tri trong admin thay doi — khong can restart bot.
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 
+from features.readmail import graph_api
 from features.readmail.graph_api import (
     exchange_refresh_token,
     get_message_detail,
@@ -13,7 +20,62 @@ from features.readmail.graph_api import (
 
 logger = logging.getLogger(__name__)
 
-_executor = ThreadPoolExecutor(max_workers=10)
+# ── Thread pool tao lazy, tu ap dung cau hinh tu admin ─────────────────────
+DEFAULT_MAX_WORKERS = 10
+DEFAULT_TOKEN_CONCURRENCY = 4
+TUNING_TTL = 30  # giay: khoang cach giua 2 lan doc lai cau hinh tu DB
+
+_executor: ThreadPoolExecutor | None = None
+_executor_size = 0
+_tuning_checked_at = 0.0
+
+
+def _clamp(raw, default: int, lo: int, hi: int) -> int:
+    """Doi gia tri cau hinh sang int trong khoang [lo, hi]."""
+    try:
+        return max(lo, min(int(str(raw).strip()), hi))
+    except (TypeError, ValueError):
+        return default
+
+
+async def _get_executor() -> ThreadPoolExecutor:
+    """Lay thread pool; dinh ky doc lai cau hinh tu admin va ap dung."""
+    global _executor, _executor_size, _tuning_checked_at
+
+    now = time.monotonic()
+    if _executor is not None and (now - _tuning_checked_at) < TUNING_TTL:
+        return _executor
+    _tuning_checked_at = now
+
+    workers = DEFAULT_MAX_WORKERS
+    token_conc = DEFAULT_TOKEN_CONCURRENCY
+    try:
+        from core.db import get_setting
+        workers = _clamp(
+            await get_setting("MAX_MAIL_WORKERS"), DEFAULT_MAX_WORKERS, 1, 100,
+        )
+        token_conc = _clamp(
+            await get_setting("TOKEN_EXCHANGE_CONCURRENCY"),
+            DEFAULT_TOKEN_CONCURRENCY, 1, 50,
+        )
+    except Exception:
+        logger.exception("Khong doc duoc cau hinh tu admin, dung mac dinh:")
+
+    # Ap dung so luong dong thoi khi doi token
+    graph_api.set_token_concurrency(token_conc)
+
+    # Tao lai thread pool neu chua co hoac so worker thay doi
+    if _executor is None or workers != _executor_size:
+        old = _executor
+        _executor = ThreadPoolExecutor(
+            max_workers=workers, thread_name_prefix="readmail",
+        )
+        _executor_size = workers
+        if old is not None:
+            old.shutdown(wait=False)
+            logger.info("MAX_MAIL_WORKERS doi thanh %d", workers)
+
+    return _executor
 
 
 def _sync_read_mail(account: dict, limit: int = 5) -> dict:
@@ -168,7 +230,8 @@ def _sync_mail_detail(account: dict, message_id: str) -> dict:
 async def async_read_mail(account: dict, limit: int = 5) -> dict:
     """Doc mail async cho mot tai khoan."""
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_executor, _sync_read_mail, account, limit)
+    ex = await _get_executor()
+    return await loop.run_in_executor(ex, _sync_read_mail, account, limit)
 
 
 async def async_read_all_accounts(
@@ -197,18 +260,21 @@ async def async_read_all_accounts(
 async def async_get_code(account: dict, limit: int = 5) -> dict:
     """Tim ma xac nhan tot nhat async."""
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_executor, _sync_get_code, account, limit)
+    ex = await _get_executor()
+    return await loop.run_in_executor(ex, _sync_get_code, account, limit)
 
 
 async def async_get_all_codes(account: dict, limit: int = 5) -> dict:
     """Tim tat ca ma xac nhan async."""
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_executor, _sync_get_all_codes, account, limit)
+    ex = await _get_executor()
+    return await loop.run_in_executor(ex, _sync_get_all_codes, account, limit)
 
 
 async def async_mail_detail(account: dict, message_id: str) -> dict:
     """Doc chi tiet mot email async."""
     loop = asyncio.get_running_loop()
+    ex = await _get_executor()
     return await loop.run_in_executor(
-        _executor, _sync_mail_detail, account, message_id
+        ex, _sync_mail_detail, account, message_id
     )

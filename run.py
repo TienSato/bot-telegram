@@ -87,6 +87,22 @@ class BotManager:
     def running_count(self) -> int:
         return len(self._running)
 
+    async def _read_interval(self) -> int:
+        """Doc BOT_CHECK_INTERVAL tu Admin -> Bot Settings (doi la an ngay).
+
+        Neu chua dat hoac gia tri sai -> giu nguyen gia tri hien tai.
+        """
+        try:
+            from core.db import get_setting
+            raw = await get_setting("BOT_CHECK_INTERVAL")
+            if raw:
+                return max(3, min(int(str(raw).strip()), 3600))
+        except (TypeError, ValueError):
+            pass
+        except Exception:
+            logger.exception("BotManager: khong doc duoc BOT_CHECK_INTERVAL")
+        return self._check_interval
+
     async def run(self) -> None:
         """Vong lap chinh — kiem tra thay doi dinh ky."""
         logger.info(
@@ -97,6 +113,15 @@ class BotManager:
         await self._sync_bots()
 
         while True:
+            # Doc lai chu ky tu admin moi vong (doi trong admin la an ngay)
+            interval = await self._read_interval()
+            if interval != self._check_interval:
+                logger.info(
+                    "BOT_CHECK_INTERVAL doi %ds -> %ds",
+                    self._check_interval, interval,
+                )
+                self._check_interval = interval
+
             await asyncio.sleep(self._check_interval)
             try:
                 await self._sync_bots()
